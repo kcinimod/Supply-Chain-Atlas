@@ -1,0 +1,52 @@
+version: 2
+
+# v2: data-quality gates at the STAGING layer too (v1 tested only marts), so a
+# broken silver load fails fast — before marts build on top of it.
+models:
+  - name: stg_form4_transaction
+    columns:
+      - name: transaction_id
+        tests: [not_null, unique]
+      - name: accession_no
+        tests: [not_null]
+      - name: acquired_disposed
+        tests:
+          - accepted_values:
+              values: ["A", "D"]
+              config:
+                where: "acquired_disposed is not null"
+
+  - name: stg_form13f_holding
+    columns:
+      - name: holding_id
+        tests: [not_null, unique]
+      - name: manager_cik
+        tests: [not_null]
+
+  - name: stg_exhibit21_subsidiary
+    columns:
+      - name: subsidiary_id
+        tests: [not_null, unique]
+
+  - name: stg_sched13dg_stake
+    columns:
+      - name: stake_id
+        tests: [not_null, unique]
+
+  - name: stg_price_daily
+    columns:
+      - name: ticker
+        tests: [not_null]
+      - name: trade_date
+        tests: [not_null]
+      - name: adj_close
+        tests: [not_null]
+
+  - name: stg_universe_member
+    columns:
+      - name: module
+        tests: [not_null]
+      - name: side
+        tests:
+          - accepted_values:
+              values: ["supplier", "customer", "owner"]

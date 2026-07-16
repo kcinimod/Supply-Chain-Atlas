@@ -1,0 +1,342 @@
+# Supply Chain Atlas v2 stack.
+#
+# Core (always on):   postgres + pgvector · Airflow 3 (LocalExecutor) · MLflow
+# Streaming profile:  Redpanda (Kafka API) · Flink · live EDGAR producer/consumer
+#
+# Laptop-off resilience: every long-running service is `restart: unless-stopped`,
+# so the whole stack (scheduler included) comes back when Docker Desktop starts
+# at 09:00 SGT. Airflow then fires the latest missed run of each DAG and the
+# cursor-based EDGAR poller re-walks every index day it slept through — gaps
+# self-heal with no manual step.
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: airflow/Dockerfile
+  image: atlas-airflow:3.3.0
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: Asia/Singapore
+    AIRFLOW__CORE__DAGS_FOLDER: /opt/atlas/airflow/dags
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://atlas:atlas@postgres:5432/airflow
+    # Local single-user deployment: the simple auth manager with everyone-admin
+    # avoids user bootstrapping. Swap to FabAuthManager + real users for SaaS.
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
+    AIRFLOW__SCHEDULER__CATCHUP_BY_DEFAULT: "false"
+    # Airflow 3 task processes call back to the execution API; the default
+    # (localhost:8080) only works single-container — point at the apiserver.
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    # Scheduler-signed task tokens must validate on the apiserver: all
+    # components need the SAME JWT secret (each generates a random one if
+    # unset → "Invalid auth token" on every task start).
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:-atlas-local-jwt-secret-change-me}
+    # --- Atlas task-code config (same names as host .env) ---
+    PYTHONPATH: /opt/atlas
+    DATABASE_URL: postgresql://atlas:atlas@postgres:5432/atlas
+    DBT_PG_HOST: postgres
+    MLFLOW_TRACKING_URI: http://mlflow:5000
+    SEC_USER_AGENT: ${SEC_USER_AGENT:-}
+    RATE_LIMIT_RPS: ${RATE_LIMIT_RPS:-8}
+    DOC_FETCH_LIMIT: ${DOC_FETCH_LIMIT:-200}
+    # Ollama runs on the host (Windows), reachable from containers via:
+    OLLAMA_URL: http://host.docker.internal:11434
+    KAFKA_BOOTSTRAP: redpanda:9092
+  volumes:
+    - .:/opt/atlas                       # code + dbt project + data/ bronze
+    - airflow-logs:/opt/airflow/logs
+  depends_on:
+    init-dbs:
+      condition: service_completed_successfully
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: atlas-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: atlas
+      POSTGRES_PASSWORD: atlas
+      POSTGRES_DB: atlas
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atlas -d atlas"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # One-shot: create the airflow + mlflow databases if missing. An init script
+  # in docker-entrypoint-initdb.d would only run on a *fresh* pgdata volume,
+  # and ours predates v2 — so this sidecar is the upgrade-safe path.
+  init-dbs:
+    image: pgvector/pgvector:pg17
+    container_name: atlas-init-dbs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: atlas
+    entrypoint: >
+      bash -c "
+      psql -h postgres -U atlas -d atlas -tc \"SELECT 1 FROM pg_database WHERE datname='airflow'\" | grep -q 1 || createdb -h postgres -U atlas airflow;
+      psql -h postgres -U atlas -d atlas -tc \"SELECT 1 FROM pg_database WHERE datname='mlflow'\"  | grep -q 1 || createdb -h postgres -U atlas mlflow;
+      echo 'aux databases ready'
+      "
+    restart: "no"
+
+  mlflow:
+    build:
+      context: docker/mlflow
+    image: atlas-mlflow:v3.13.0
+    container_name: atlas-mlflow
+    restart: unless-stopped
+    depends_on:
+      init-dbs:
+        condition: service_completed_successfully
+    command: >
+      mlflow server
+      --host 0.0.0.0 --port 5000
+      --allowed-hosts "mlflow:5000,localhost:5000,127.0.0.1:5000"
+      --backend-store-uri postgresql://atlas:atlas@postgres:5432/mlflow
+      --artifacts-destination /mlartifacts
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlartifacts:/mlartifacts
+
+  airflow-init:
+    <<: *airflow-common
+    container_name: atlas-airflow-init
+    entrypoint: airflow
+    command: ["db", "migrate"]
+    restart: "no"
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: atlas-airflow-scheduler
+    command: scheduler
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    container_name: atlas-airflow-dag-processor
+    command: dag-processor
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
+  airflow-apiserver:
+    <<: *airflow-common
+    container_name: atlas-airflow-apiserver
+    command: api-server
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/api/v2/version || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Serving API + live dashboard (Phase 7). Reuses the Airflow image as a
+  # batteries-included Python runtime; the repo bind-mount means code changes
+  # apply on restart, no rebuild.
+  api:
+    image: atlas-airflow:3.3.0
+    container_name: atlas-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["python", "-m", "uvicorn", "api.app:app",
+                 "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      PYTHONPATH: /opt/atlas
+      DATABASE_URL: postgresql://atlas:atlas@postgres:5432/atlas
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/opt/atlas
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  # ------------------------------------------------------------------ streaming
+  # Kafka-compatible broker (single binary, KRaft). Two listeners: INTERNAL for
+  # containers (redpanda:9092), EXTERNAL for host processes (localhost:19092).
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: atlas-redpanda
+    profiles: ["streaming"]
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --kafka-addr=INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:19092
+      - --advertise-kafka-addr=INTERNAL://redpanda:9092,EXTERNAL://localhost:19092
+      - --smp=1
+      - --memory=1G
+      - --mode=dev-container
+    ports:
+      - "19092:19092"   # host clients
+      - "9644:9644"     # admin/metrics
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -qE 'Healthy:.*true'"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  redpanda-console:
+    image: redpandadata/console:v2.7.2
+    container_name: atlas-redpanda-console
+    profiles: ["streaming"]
+    restart: unless-stopped
+    depends_on: [redpanda]
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+    ports:
+      - "8085:8080"
+
+  flink-jobmanager:
+    build:
+      context: ./streaming/flink
+    image: atlas-flink:1.20.0
+    container_name: atlas-flink-jm
+    profiles: ["streaming"]
+    restart: unless-stopped
+    depends_on: [redpanda]
+    command: jobmanager
+    ports:
+      - "8081:8081"
+    environment:
+      FLINK_PROPERTIES: "jobmanager.rpc.address: flink-jobmanager"
+    volumes:
+      - ./streaming:/opt/job
+
+  flink-taskmanager:
+    image: atlas-flink:1.20.0
+    container_name: atlas-flink-tm
+    profiles: ["streaming"]
+    restart: unless-stopped
+    depends_on: [flink-jobmanager]
+    command: taskmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 2
+    volumes:
+      - ./streaming:/opt/job
+
+  # Keeps the trade-windows SQL job running: checks the jobmanager every 60s
+  # and (re)submits when no job is RUNNING — so a laptop wake-up (fresh
+  # jobmanager, no HA state) heals itself without an operator.
+  flink-submit:
+    image: atlas-flink:1.20.0
+    container_name: atlas-flink-submit
+    profiles: ["streaming"]
+    restart: unless-stopped
+    depends_on: [flink-jobmanager, flink-taskmanager]
+    volumes:
+      - ./streaming:/opt/job
+    entrypoint: >
+      bash -c "
+      CONF=/opt/flink/conf/config.yaml; [ -f \"$$CONF\" ] || CONF=/opt/flink/conf/flink-conf.yaml;
+      printf 'rest.address: flink-jobmanager\njobmanager.rpc.address: flink-jobmanager\n' >> \"$$CONF\";
+      while true; do
+        if ! curl -s http://flink-jobmanager:8081/jobs/overview | grep -q '\"state\":\"RUNNING\"'; then
+          echo 'no running job - submitting trade-windows SQL';
+          ./bin/sql-client.sh -f /opt/job/flink_job.sql || echo 'submit failed; will retry';
+        fi;
+        sleep 60;
+      done"
+
+  # ---------------------------------------------------------- stream workers
+  # The Python producers/consumers, always-on under the streaming profile.
+  # They reuse the Airflow image purely as a batteries-included Python runtime
+  # (same deps, same bind-mounted code) — one image to build, not two.
+  edgar-live:
+    image: atlas-airflow:3.3.0
+    container_name: atlas-edgar-live
+    profiles: ["streaming"]
+    restart: unless-stopped
+    depends_on:
+      redpanda: {condition: service_healthy}
+      postgres: {condition: service_healthy}
+    entrypoint: ["python", "-m", "streaming.edgar_producer"]
+    environment: &stream-env
+      PYTHONPATH: /opt/atlas
+      DATABASE_URL: postgresql://atlas:atlas@postgres:5432/atlas
+      KAFKA_BOOTSTRAP: redpanda:9092
+      SEC_USER_AGENT: ${SEC_USER_AGENT:-}
+    volumes:
+      - .:/opt/atlas
+
+  stream-alerts:
+    image: atlas-airflow:3.3.0
+    container_name: atlas-stream-alerts
+    profiles: ["streaming"]
+    restart: unless-stopped
+    depends_on:
+      redpanda: {condition: service_healthy}
+      postgres: {condition: service_healthy}
+    entrypoint: ["python", "-m", "streaming.alert_consumer"]
+    environment: *stream-env
+    volumes:
+      - .:/opt/atlas
+
+  trade-producer:
+    image: atlas-airflow:3.3.0
+    container_name: atlas-trade-producer
+    profiles: ["streaming"]
+    restart: unless-stopped
+    depends_on:
+      redpanda: {condition: service_healthy}
+    # synthetic by default (no API key needed); event time anchored to "now"
+    # (--base-ts-ms 0) so container restarts keep producing fresh windows.
+    entrypoint: ["python", "-m", "streaming.finnhub_producer",
+                 "--mode", "synthetic", "--seconds", "86400", "--base-ts-ms", "0"]
+    environment: *stream-env
+    volumes:
+      - .:/opt/atlas
+
+  window-sink:
+    image: atlas-airflow:3.3.0
+    container_name: atlas-window-sink
+    profiles: ["streaming"]
+    restart: unless-stopped
+    depends_on:
+      redpanda: {condition: service_healthy}
+      postgres: {condition: service_healthy}
+    entrypoint: ["python", "-m", "streaming.window_sink"]
+    environment: *stream-env
+    volumes:
+      - .:/opt/atlas
+
+volumes:
+  pgdata:
+  redpanda-data:
+  airflow-logs:
+  mlartifacts:

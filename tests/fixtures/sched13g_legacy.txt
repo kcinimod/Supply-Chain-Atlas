@@ -1,0 +1,49 @@
+<SEC-DOCUMENT>0000102909-99-000123.txt : 19990210
+<SEC-HEADER>0000102909-99-000123.hdr.sgml : 19990210
+ACCESSION NUMBER:		0000102909-99-000123
+CONFORMED SUBMISSION TYPE:	SC 13G
+PUBLIC DOCUMENT COUNT:		1
+FILED AS OF DATE:		19990210
+SUBJECT COMPANY:
+	COMPANY DATA:
+		COMPANY CONFORMED NAME:			ATLAS SEMICONDUCTOR CORP
+		CENTRAL INDEX KEY:			0001111111
+FILED BY:
+	COMPANY DATA:
+		COMPANY CONFORMED NAME:			VANGUARD GROUP INC
+		CENTRAL INDEX KEY:			0000102909
+</SEC-HEADER>
+<DOCUMENT>
+<TYPE>SC 13G
+<SEQUENCE>1
+<DESCRIPTION>SCHEDULE 13G
+<TEXT>
+
+                       UNITED STATES
+             SECURITIES AND EXCHANGE COMMISSION
+                   Washington, D.C. 20549
+
+                       SCHEDULE 13G
+
+           Under the Securities Exchange Act of 1934
+
+                 Atlas Semiconductor Corp
+                  (Name of Issuer)
+
+                    Common Stock
+             (Title of Class of Securities)
+
+                     049164205
+                  (CUSIP Number)
+
+Item 9.  Aggregate Amount Beneficially Owned by Each Reporting Person:
+
+         2,345,678 shares
+
+Item 11. Percent of Class:
+
+         7.5%
+
+</TEXT>
+</DOCUMENT>
+</SEC-DOCUMENT>

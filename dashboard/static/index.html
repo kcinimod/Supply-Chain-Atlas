@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Supply Chain Atlas — SEC EDGAR relationship graph</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="wordmark"><b>Supply Chain</b> <span>Atlas</span></div>
+    <div class="seg" role="group" aria-label="View">
+      <button id="viewDash" aria-pressed="true">Dashboard</button>
+      <button id="viewDir" aria-pressed="false">Directory</button>
+      <button id="viewChg" aria-pressed="false">Changes</button>
+    </div>
+    <span class="status"><span class="dot" id="liveDot"></span>
+      <span id="statusTxt">connecting…</span>
+      <span class="mono" id="asOf"></span></span>
+    <span class="counts mono"><b id="nComp">–</b> companies · <b id="nEdges">–</b> edges</span>
+    <button class="theme-btn" id="themeBtn" aria-label="Toggle light or dark theme"><span id="themeIcon">◐</span> theme</button>
+  </header>
+
+  <section class="pulse" id="pulse" aria-label="Model and pipeline health"></section>
+  <section class="mkt" id="mkt" hidden aria-label="Live market context"></section>
+
+  <div class="grid" id="gridMain">
+    <aside class="feed panel" aria-label="Filing feed">
+      <div class="panel-head"><span class="eyebrow">Filing feed</span><span class="meta" id="feedScope">universe · daily index</span></div>
+      <div id="feed"></div>
+      <div class="footnote">Reverse-chronological. Code colored by relevance.</div>
+    </aside>
+
+    <section class="stage">
+      <div class="graph-card">
+        <div class="gc-head">
+          <h2 id="graphTitle">Relationship network</h2>
+          <div class="seg" role="group" aria-label="Graph scope">
+            <button id="btnUniverse" aria-pressed="true">Entire universe</button>
+            <button id="btnCompany" aria-pressed="false">Company</button>
+          </div>
+          <div class="searchbox">
+            <input id="search" class="search" type="text" autocomplete="off"
+                   placeholder="Search ticker or company…" aria-label="Search company" />
+            <div id="results" class="results" hidden></div>
+          </div>
+        </div>
+        <svg id="graph" viewBox="0 0 760 470" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Relationship graph"></svg>
+        <div class="legend" id="legend"></div>
+      </div>
+      <div class="detail" id="detail">
+        <div class="detail-head" id="detailHead"></div>
+        <div class="chips-row" id="outlookRow" hidden></div>
+        <div class="kv" id="detailKv"></div>
+      </div>
+    </section>
+
+    <aside class="rail panel" aria-label="Alerts and top stakes">
+      <div class="panel-head"><span class="eyebrow">Alerts</span><span class="meta" id="alertMeta">live</span></div>
+      <div id="alerts"><div class="empty">Waiting for the live feed…</div></div>
+      <div class="panel-head" style="margin-top:6px"><span class="eyebrow">Top current stakes</span><span class="meta">&gt;3% · 13D/G/F</span></div>
+      <table class="stk"><tbody id="stakes"></tbody></table>
+      <div class="footnote">Click a row to focus that company.</div>
+    </aside>
+  </div>
+
+  <section id="directory" class="directory" hidden aria-label="Company directory"></section>
+
+  <section id="changes" class="changes" hidden aria-label="Change events">
+    <div class="panel-head" style="padding:0 0 8px">
+      <span class="eyebrow">Change events</span>
+      <span class="meta" id="chgMeta">detected from filings · latest 30</span>
+    </div>
+    <div class="chg-card" id="chgList"><div class="empty">Waiting for the live feed…</div></div>
+    <div class="footnote" style="padding:8px 2px 0">Click a row to focus that company in the graph.</div>
+  </section>
+
+  <div id="tip" role="status" aria-live="polite"><div class="tt"></div><div class="tm"></div><div class="tc"></div></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

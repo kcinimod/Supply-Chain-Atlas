@@ -1,0 +1,31 @@
+name: 'atlas'
+version: '1.0.0'
+config-version: 2
+
+# Profile lives alongside this file; run with --profiles-dir dbt (see README).
+profile: 'atlas'
+
+model-paths: ["models"]
+snapshot-paths: ["snapshots"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  # Abnormal returns are measured against this ticker (fetched by the market
+  # source alongside the universe). Override per-environment if needed.
+  benchmark_ticker: "SPY"
+
+# Silver (Python-loaded) tables are read as sources; staging = thin views that
+# clean/cast them; marts = materialized star-schema tables (dim_* / fact_*).
+# The two growing facts (insider transactions, holdings) and the price fact are
+# incremental so the daily run stops rebuilding history it already has.
+models:
+  atlas:
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table

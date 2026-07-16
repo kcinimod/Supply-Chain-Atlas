@@ -1,0 +1,14 @@
+Description:           Master Index of EDGAR Dissemination Feed by Data Received
+Last Data Received:    January 15, 2024
+Comments:              webmaster@sec.gov
+Anonymous FTP:         ftp://ftp.sec.gov/edgar/
+
+
+
+CIK|Company Name|Form Type|Date Filed|File Name
+--------------------------------------------------------------------------------
+320193|Apple Inc.|4|20240115|edgar/data/320193/0000320193-24-000006.txt
+1045810|NVIDIA CORP|10-K|20240115|edgar/data/1045810/0001045810-24-000029.txt
+1101239|EQUINIX INC|8-K|20240115|edgar/data/1101239/0001101239-24-000012.txt
+not|a|valid|row
+102909|VANGUARD GROUP INC|SC 13G/A|20240115|edgar/data/102909/0000102909-24-000456.txt

@@ -1,0 +1,89 @@
+<SEC-DOCUMENT>0000950123-23-001234.txt : 20230214
+<SEC-HEADER>0000950123-23-001234.hdr.sgml : 20230214
+ACCESSION NUMBER:		0000950123-23-001234
+CONFORMED SUBMISSION TYPE:	13F-HR
+PUBLIC DOCUMENT COUNT:		2
+CONFORMED PERIOD OF REPORT:	20221231
+FILED AS OF DATE:		20230214
+</SEC-HEADER>
+<DOCUMENT>
+<TYPE>13F-HR
+<SEQUENCE>1
+<FILENAME>primary_doc.xml
+<TEXT>
+<XML>
+<?xml version="1.0" encoding="UTF-8"?>
+<edgarSubmission xmlns="http://www.sec.gov/edgar/thirteenffiler" xmlns:com="http://www.sec.gov/edgar/common">
+  <headerData>
+    <submissionType>13F-HR</submissionType>
+    <filerInfo>
+      <periodOfReport>12-31-2022</periodOfReport>
+    </filerInfo>
+  </headerData>
+  <formData>
+    <coverPage>
+      <reportCalendarOrQuarter>12-31-2022</reportCalendarOrQuarter>
+      <filingManager>
+        <name>EXAMPLE CAPITAL MANAGEMENT LLC</name>
+        <address>
+          <com:street1>100 Main St</com:street1>
+          <com:city>Boston</com:city>
+          <com:stateOrCountry>MA</com:stateOrCountry>
+          <com:zipCode>02110</com:zipCode>
+        </address>
+      </filingManager>
+    </coverPage>
+  </formData>
+</edgarSubmission>
+</XML>
+</TEXT>
+</DOCUMENT>
+<DOCUMENT>
+<TYPE>INFORMATION TABLE
+<SEQUENCE>2
+<FILENAME>infotable.xml
+<TEXT>
+<XML>
+<?xml version="1.0" encoding="UTF-8"?>
+<informationTable xmlns="http://www.sec.gov/edgar/document/thirteenf/informationtable">
+  <infoTable>
+    <nameOfIssuer>NVIDIA CORP</nameOfIssuer>
+    <titleOfClass>COM</titleOfClass>
+    <cusip>67066G104</cusip>
+    <value>146250</value>
+    <shrsOrPrnAmt>
+      <sshPrnamt>1000000</sshPrnamt>
+      <sshPrnamtType>SH</sshPrnamtType>
+    </shrsOrPrnAmt>
+    <investmentDiscretion>SOLE</investmentDiscretion>
+    <votingAuthority>
+      <Sole>1000000</Sole>
+      <Shared>0</Shared>
+      <None>0</None>
+    </votingAuthority>
+  </infoTable>
+  <infoTable>
+    <nameOfIssuer>ENTEGRIS INC</nameOfIssuer>
+    <titleOfClass>COM</titleOfClass>
+    <cusip>29362U104</cusip>
+    <value>9,876</value>
+    <shrsOrPrnAmt>
+      <sshPrnamt>150000</sshPrnamt>
+      <sshPrnamtType>SH</sshPrnamtType>
+    </shrsOrPrnAmt>
+    <investmentDiscretion>DFND</investmentDiscretion>
+    <votingAuthority>
+      <Sole>0</Sole>
+      <Shared>150000</Shared>
+      <None>0</None>
+    </votingAuthority>
+  </infoTable>
+  <infoTable>
+    <nameOfIssuer>MYSTERY HOLDCO</nameOfIssuer>
+    <cusip>000000000</cusip>
+  </infoTable>
+</informationTable>
+</XML>
+</TEXT>
+</DOCUMENT>
+</SEC-DOCUMENT>

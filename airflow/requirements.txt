@@ -1,0 +1,27 @@
+# Task-code dependencies installed into the Airflow image (see Dockerfile).
+# EXACT pins (mirroring the host uv.lock resolution). apache-airflow is pinned
+# here too so the uv resolution preserves the base image's install intact.
+# When bumping pyproject.toml deps, refresh these from `uv pip list`.
+apache-airflow==3.3.0
+requests==2.34.2
+tenacity==9.1.4
+python-dotenv==1.2.2
+psycopg[binary]==3.3.4
+psycopg-pool==3.3.1
+pydantic==2.13.4
+dbt-postgres==1.10.2
+dbt-core==1.11.12
+beautifulsoup4==4.15.0
+kafka-python-ng==2.2.3
+scikit-learn==1.9.0
+mlflow==3.14.0
+joblib==1.5.3
+yfinance==1.5.1
+pyarrow==24.0.0
+pandas==2.3.3
+numpy==2.5.1
+# dbt-in-Airflow: renders the dbt project as a task group with per-model tasks.
+astronomer-cosmos==1.15.0
+# The same image doubles as the runtime for stream workers and the serving API.
+# fastapi/uvicorn are NOT pinned here: Airflow 3 already ships both (its
+# api-server runs on them) and forcing newer versions breaks airflow's cadwyn.

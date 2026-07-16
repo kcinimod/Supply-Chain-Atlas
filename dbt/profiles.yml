@@ -1,0 +1,15 @@
+# Connection for the local Docker Postgres. Defaults match .env / docker-compose;
+# override with DBT_PG_* env vars if needed. Models build into the `analytics`
+# schema, kept separate from the `public` raw/silver tables.
+atlas:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('DBT_PG_HOST', 'localhost') }}"
+      port: "{{ env_var('DBT_PG_PORT', '5432') | int }}"
+      user: "{{ env_var('DBT_PG_USER', 'atlas') }}"
+      password: "{{ env_var('DBT_PG_PASSWORD', 'atlas') }}"
+      dbname: "{{ env_var('DBT_PG_DBNAME', 'atlas') }}"
+      schema: analytics
+      threads: 4

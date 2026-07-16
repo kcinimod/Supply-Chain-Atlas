@@ -1,0 +1,49 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Secrets
+.env
+
+# Data lake (raw filings, bronze layer)
+data/
+
+# dbt build artifacts
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+logs/
+
+# dbt local overrides
+dbt/.user.yml
+
+# Course materials — instructor-owned "SIT Internal" lecture notes and the
+# graded assignment rubric. Kept out of the repo; the phase docs and
+# V2_REVAMP_PLAN reference the rubric by content, not by copying it.
+docs/day_*.txt
+docs/lessons/
+docs/project_instructions.txt
+
+# A different project's material (RiskPulse) — reference only, not part of this
+# project and not for publication.
+docs/For reference only*/
+
+# Airflow (v2): logs are bind-mounted/volume-backed, never committed
+airflow/logs/
+
+# MLflow (Phase 5): local tracking DB + artifact store
+mlflow.db
+mlruns/
+mlartifacts/
+
+# Gold-set harness (Phase 6): the review file is regenerable from the DB
+# snapshots via `python -m nlp.gold.dump_candidates`; the curated
+# supply_gold.jsonl (hand-labeled truth) IS committed.
+nlp/gold/supply_gold_review.jsonl

@@ -1,0 +1,47 @@
+version: 2
+
+sources:
+  - name: atlas
+    description: >
+      Phase 1 (raw landing) and Phase 2 (Python-parsed silver) tables in the
+      public schema. dbt treats these as immutable inputs.
+    schema: public
+    tables:
+      - name: raw_filing
+        description: Immutable filing-metadata landing record, keyed by accession.
+      - name: dim_company
+        description: Canonical company reference seeded from company_tickers.json.
+      - name: form4_transaction
+        description: Parsed Form 4 insider transactions (one row per transaction).
+      - name: form4_parse_log
+        description: One row per attempted Form 4 parse (audit + idempotency).
+      - name: form13f_holding
+        description: Parsed 13F-HR institutional holdings (one row per holding).
+      - name: form13f_parse_log
+        description: One row per attempted 13F parse (audit + idempotency).
+      - name: exhibit21_subsidiary
+        description: Parsed 10-K Exhibit 21 parent->subsidiary relationships.
+      - name: exhibit21_parse_log
+        description: One row per attempted Exhibit 21 parse (audit + idempotency).
+      - name: sched13dg_stake
+        description: Parsed Schedule 13D/G beneficial-ownership stakes.
+      - name: sched13dg_parse_log
+        description: One row per attempted 13D/G parse (audit + idempotency).
+      - name: supply_relationship
+        description: LLM-extracted supplier->customer customer-concentration facts (Phase 6).
+      - name: supply_extract_log
+        description: One row per attempted 10-K supply-chain extraction (audit + idempotency).
+      - name: universe_member
+        description: >
+          The curated universe as data (v2): one row per member, seeded from
+          db/seeds/universe.csv. Scope changes are data changes, not code.
+      - name: price_daily
+        description: >
+          Daily OHLCV bars (yfinance) for universe tickers + benchmark (v2
+          market source). Feeds returns, reaction labels and actuals-backfill.
+        loaded_at_field: loaded_at
+        freshness:
+          # Bars land every trading day; weekends/holidays make 2 quiet days
+          # normal, so warn at 4 and error at 7.
+          warn_after: {count: 4, period: day}
+          error_after: {count: 7, period: day}

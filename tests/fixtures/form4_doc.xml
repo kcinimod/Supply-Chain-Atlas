@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ownershipDocument>
+    <schemaVersion>X0306</schemaVersion>
+    <documentType>4</documentType>
+    <periodOfReport>05/01/2024</periodOfReport>
+    <issuer>
+        <issuerCik>0000883241</issuerCik>
+        <issuerName>ENTEGRIS INC</issuerName>
+    </issuer>
+    <reportingOwner>
+        <reportingOwnerId>
+            <rptOwnerCik>0007654321</rptOwnerCik>
+            <rptOwnerName>SMITH JOHN</rptOwnerName>
+        </reportingOwnerId>
+        <reportingOwnerRelationship>
+            <isDirector>true</isDirector>
+            <isOfficer>0</isOfficer>
+        </reportingOwnerRelationship>
+    </reportingOwner>
+</ownershipDocument>

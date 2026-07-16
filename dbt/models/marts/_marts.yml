@@ -1,0 +1,184 @@
+version: 2
+
+models:
+  - name: dim_company
+    description: Company dimension (one row per universe CIK).
+    columns:
+      - name: company_cik
+        description: Primary key — SEC Central Index Key.
+        data_tests: [unique, not_null]
+
+  - name: dim_person
+    description: Insider (reporting-owner) dimension, one row per CIK.
+    columns:
+      - name: person_cik
+        description: Primary key — the insider's SEC CIK.
+        data_tests: [unique, not_null]
+      - name: name_variant_count
+        description: Distinct name spellings seen for this CIK (resolution signal).
+        data_tests: [not_null]
+
+  - name: dim_date
+    description: Contiguous day dimension over observed transaction dates.
+    columns:
+      - name: date_key
+        description: Integer YYYYMMDD surrogate key.
+        data_tests: [unique, not_null]
+      - name: date_day
+        data_tests: [unique, not_null]
+
+  - name: fact_insider_transaction
+    description: One row per Form 4 transaction (insider -> company edge).
+    columns:
+      - name: transaction_id
+        description: Surrogate grain key = accession_no + txn_seq.
+        data_tests: [unique, not_null]
+      - name: person_cik
+        description: FK to dim_person.
+        data_tests:
+          - relationships:
+              to: ref('dim_person')
+              field: person_cik
+      - name: company_cik
+        description: FK to dim_company.
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_company')
+              field: company_cik
+      - name: date_key
+        description: FK to dim_date.
+        data_tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+      - name: acquired_disposed
+        data_tests:
+          - accepted_values:
+              values: ['A', 'D']
+              config:
+                where: "acquired_disposed is not null"
+
+  - name: dim_security
+    description: Security dimension keyed by CUSIP (13F holdings).
+    columns:
+      - name: cusip
+        description: Primary key — CUSIP identifier.
+        data_tests: [unique, not_null]
+
+  - name: fact_holding
+    description: One row per 13F holding (institution -> security edge, quarterly).
+    columns:
+      - name: holding_id
+        description: Surrogate grain key = accession_no + holding_seq.
+        data_tests: [unique, not_null]
+      - name: company_cik
+        description: FK to dim_company (the filing institution).
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_company')
+              field: company_cik
+      - name: cusip
+        description: FK to dim_security.
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_security')
+              field: cusip
+      - name: date_key
+        description: FK to dim_date (period of report).
+        data_tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+
+  - name: bridge_subsidiary
+    description: Parent->subsidiary bridge from 10-K Exhibit 21 (factless).
+    columns:
+      - name: subsidiary_id
+        description: Surrogate grain key = accession_no + sub_seq.
+        data_tests: [unique, not_null]
+      - name: company_cik
+        description: FK to dim_company (the 10-K registrant / parent).
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_company')
+              field: company_cik
+      - name: subsidiary_name
+        description: Name-only subsidiary node (subsidiaries have no CIK).
+        data_tests: [not_null]
+
+  - name: fact_ownership_stake
+    description: >
+      13D/G beneficial-ownership stakes in universe companies (owner->subject),
+      with window-function SCD Type 2 validity windows per (subject, filer).
+    columns:
+      - name: stake_id
+        description: Surrogate grain key = accession_no + stake_seq.
+        data_tests: [unique, not_null]
+      - name: company_cik
+        description: FK to dim_company (the subject company).
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_company')
+              field: company_cik
+      - name: date_key
+        description: FK to dim_date (as-of date).
+        data_tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_key
+
+  - name: fact_supply_relationship
+    description: >
+      Supplier -> customer edge extracted from 10-K free text by a local LLM.
+      One row per disclosed customer-concentration fact, tiered by reliability
+      (resolved / named_unresolved / unnamed) -- the honest counterpart to the
+      dashboard's solid-vs-dashed edge distinction.
+    columns:
+      - name: rel_id
+        description: Surrogate primary key (bigserial).
+        data_tests: [unique, not_null]
+      - name: supplier_cik
+        description: FK to dim_company (the disclosing filer).
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_company')
+              field: company_cik
+      - name: customer_cik
+        description: FK to dim_company when resolved to an in-universe company, else null.
+        data_tests:
+          - relationships:
+              to: ref('dim_company')
+              field: company_cik
+      - name: tier
+        description: Reliability tier of the extracted edge.
+        data_tests:
+          - accepted_values:
+              values: ['resolved', 'named_unresolved', 'unnamed']
+      - name: is_resolved
+        data_tests: [not_null]
+
+  - name: fact_price_daily
+    description: >
+      One row per (ticker, trading day): raw return, benchmark return and
+      abnormal return (v2 market source). Reaction labels and actuals-backfill
+      are measured in abnormal_return; volume_ratio_20d supports spike features.
+    columns:
+      - name: price_id
+        description: Surrogate grain key = ticker + YYYYMMDD.
+        data_tests: [unique, not_null]
+      - name: ticker
+        data_tests: [not_null]
+      - name: trade_date
+        data_tests: [not_null]
+      - name: date_key
+        description: FK to dim_date (prices fall inside the observed-date spine).
+        data_tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_key

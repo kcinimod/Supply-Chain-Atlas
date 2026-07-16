@@ -1,0 +1,58 @@
+<SEC-DOCUMENT>0002222222-24-000001.txt : 20241223
+<SEC-HEADER>0002222222-24-000001.hdr.sgml : 20241223
+ACCESSION NUMBER:		0002222222-24-000001
+CONFORMED SUBMISSION TYPE:	SCHEDULE 13D
+PUBLIC DOCUMENT COUNT:		1
+FILED AS OF DATE:		20241223
+SUBJECT COMPANY:
+	COMPANY DATA:
+		COMPANY CONFORMED NAME:			ATLAS SEMICONDUCTOR CORP
+		CENTRAL INDEX KEY:			0001111111
+		STANDARD INDUSTRIAL CLASSIFICATION:	SEMICONDUCTORS &amp; RELATED DEVICES [3674]
+	FILING VALUES:
+		FORM TYPE:		SCHEDULE 13D
+FILED BY:
+	COMPANY DATA:
+		COMPANY CONFORMED NAME:			ORION ACTIVIST FUND LP
+		CENTRAL INDEX KEY:			0002222222
+	FILING VALUES:
+		FORM TYPE:		SCHEDULE 13D
+</SEC-HEADER>
+<DOCUMENT>
+<TYPE>SCHEDULE 13D
+<SEQUENCE>1
+<FILENAME>primary_doc.xml
+<TEXT>
+<XML>
+<?xml version="1.0" encoding="UTF-8"?>
+<edgarSubmission xmlns="http://www.sec.gov/edgar/schedule13D">
+  <formData>
+    <coverPageHeader>
+      <issuerInfo>
+        <issuerName>Atlas Semiconductor Corp</issuerName>
+        <issuerCusipNumber>049164205</issuerCusipNumber>
+      </issuerInfo>
+      <eventDateRequiresFilingThisStatement>12/20/2024</eventDateRequiresFilingThisStatement>
+      <coverPageHeaderReportingPersonDetails>
+        <reportingPersonName>ORION ACTIVIST FUND LP</reportingPersonName>
+        <reportingPersonBeneficiallyOwnedNumberOfShares>
+          <soleVotingPower>1,500,000</soleVotingPower>
+          <sharedVotingPower>0</sharedVotingPower>
+          <soleDispositivePower>1500000</soleDispositivePower>
+          <sharedDispositivePower>0</sharedDispositivePower>
+        </reportingPersonBeneficiallyOwnedNumberOfShares>
+        <reportingPersonBeneficiallyOwnedAggregateNumberOfShares>1500000</reportingPersonBeneficiallyOwnedAggregateNumberOfShares>
+        <classPercent>6.2</classPercent>
+      </coverPageHeaderReportingPersonDetails>
+      <coverPageHeaderReportingPersonDetails>
+        <reportingPersonName>ORION GP HOLDINGS LLC</reportingPersonName>
+        <reportingPersonBeneficiallyOwnedAggregateNumberOfShares>1500000</reportingPersonBeneficiallyOwnedAggregateNumberOfShares>
+        <classPercent>6.2</classPercent>
+      </coverPageHeaderReportingPersonDetails>
+    </coverPageHeader>
+  </formData>
+</edgarSubmission>
+</XML>
+</TEXT>
+</DOCUMENT>
+</SEC-DOCUMENT>
