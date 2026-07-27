@@ -35,7 +35,7 @@
   let tickerToCik = {}, groups = {};
   let mode = "universe", searchQuery = "", focusCik = null, selected = null;
   let view = "dashboard", failCount = 0, lastOkAt = null;
-  const svg = byId("graph"), tip = byId("tip"), W = 760, H = 470;
+  const svg = byId("graph"), tip = byId("tip"), W = 1240, H = 760;
 
   /* ---- theme ---- */
   const tBtn = byId("themeBtn"), tIcon = byId("themeIcon");
@@ -83,6 +83,19 @@
     for (const cik in BOOT.companies) {
       const c = BOOT.companies[cik];
       if (!c.t) c.t = (c.n || cik).split(/\s+/)[0].toUpperCase().slice(0, 8);
+    }
+    // Defensive dedup: the API already returns one current row per relationship,
+    // but guard the graph against a named/resolved edge arriving twice (same
+    // supplier→customer). 'unnamed' rows are left intact — a filer can disclose
+    // several distinct unnamed >10% customers in one 10-K.
+    if (Array.isArray(BOOT.supply)) {
+      const seen = new Set();
+      BOOT.supply = BOOT.supply.filter(([sup, cus, name, , tier]) => {
+        if (tier === "unnamed") return true;
+        const key = sup + "|" + (cus || name);
+        if (seen.has(key)) return false;
+        seen.add(key); return true;
+      });
     }
     tickerToCik = {};
     for (const cik in BOOT.companies) tickerToCik[BOOT.companies[cik].t] = cik;
@@ -215,6 +228,115 @@
       + `<span class="chips-note">reaction model estimate after the latest filing event — not investment advice</span>`;
   }
 
+  /* ---- reaction model: predicted-vs-actual track record (company view) ----
+     Surfaces /api/outlook/{ticker}: per filing event the model predicts P(price
+     up) over each horizon; as market data arrives the realized abnormal return is
+     backfilled. y-axis IS the prediction (P up); each mark's SHAPE encodes whether
+     the predicted direction matched the actual move (● correct / ✕ missed / ○
+     pending) so it reads without colour. Horizon tabs double as a hit-rate card. */
+  let outlookCache = {}, rxHorizon = "1m", rxToken = 0;
+
+  async function updateReaction() {
+    const box = byId("reactionChart");
+    if (!BOOT || mode !== "company") { box.hidden = true; box.innerHTML = ""; return; }
+    const tk = BOOT.companies[focusCik].t, myToken = ++rxToken;
+    if (!outlookCache[tk]) {
+      box.hidden = false;
+      box.innerHTML = `<span class="eyebrow">Reaction model · predicted vs actual</span>`
+        + `<div class="rx-empty">loading…</div>`;
+      try {
+        const r = await fetch(`/api/outlook/${encodeURIComponent(tk)}`);
+        outlookCache[tk] = r.ok ? await r.json() : { predictions: [] };
+      } catch (e) { outlookCache[tk] = { predictions: [] }; }
+    }
+    if (myToken === rxToken) drawReaction(outlookCache[tk]);
+  }
+
+  function drawReaction(data) {
+    const box = byId("reactionChart");
+    const preds = (data && data.predictions) || [];
+    if (!preds.length) { box.hidden = true; box.innerHTML = ""; return; }
+    box.hidden = false;
+
+    const byH = {};
+    for (const h of HORIZONS) byH[h] = { rows: [], n: 0, hit: 0 };
+    for (const p of preds) {
+      const g = byH[p.horizon]; if (!g) continue;
+      g.rows.push(p);
+      if (p.actualCar != null) { g.n++; if ((p.probaUp >= 0.5) === (p.actualCar > 0)) g.hit++; }
+    }
+    const avail = HORIZONS.filter(h => byH[h].rows.length);
+    if (!avail.includes(rxHorizon)) rxHorizon = avail[0];
+    const tabs = avail.map(h => {
+      const g = byH[h], hr = g.n ? Math.round(100 * g.hit / g.n) : null;
+      return `<button class="rx-tab${h === rxHorizon ? " active" : ""}" data-h="${h}" `
+        + `title="direction hit-rate over ${h}">${h}<b>${hr != null ? hr + "%" : "–"}</b></button>`;
+    }).join("");
+
+    const g = byH[rxHorizon];
+    const rows = g.rows.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    const MAXN = 48, shown = rows.slice(-MAXN);
+    const W = 560, H = 156, PADL = 30, PADR = 12, PADT = 12, PADB = 22;
+    const plotW = W - PADL - PADR, plotH = H - PADT - PADB, n = shown.length;
+    const xAt = i => PADL + (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+    const yAt = p => PADT + (1 - p) * plotH;
+    const md = s => (s || "").slice(5);            // ISO -> MM-DD
+
+    let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Predicted P(up) vs realized outcome per event">`;
+    // y grid + labels (0 / 0.5 / 1) and the 0.5 decision midline
+    for (const t of [0, 0.5, 1]) {
+      const y = yAt(t);
+      svg += `<line class="${t === 0.5 ? "rx-mid" : "rx-ax"}" x1="${PADL}" y1="${y}" x2="${W - PADR}" y2="${y}"`
+        + (t === 0.5 ? "" : ` stroke-opacity="0.25"`) + ` />`;
+      svg += `<text class="rx-ax" x="${PADL - 4}" y="${y + 3}" text-anchor="end">${t.toFixed(1)}</text>`;
+    }
+    // marks
+    shown.forEach((p, i) => {
+      const x = xAt(i), y = yAt(p.probaUp), s = 3.9;
+      const pend = p.actualCar == null;
+      const hit = !pend && ((p.probaUp >= 0.5) === (p.actualCar > 0));
+      const tip = `${md(p.date)} · ${esc(p.eventType || "event")} · P(up) ${p.probaUp.toFixed(2)}`
+        + ` · actual ${pend ? "pending" : (p.actualCar >= 0 ? "+" : "") + (p.actualCar * 100).toFixed(1) + "%"}`
+        + ` · ${pend ? "pending" : hit ? "correct" : "missed"}`;
+      if (pend) {
+        svg += `<circle class="rx-pend" cx="${x}" cy="${y}" r="${s - 0.4}"><title>${tip}</title></circle>`;
+      } else if (hit) {
+        svg += `<circle class="rx-hit" cx="${x}" cy="${y}" r="${s}"><title>${tip}</title></circle>`;
+      } else {
+        svg += `<g><title>${tip}</title>`
+          + `<line class="rx-miss" x1="${x - s}" y1="${y - s}" x2="${x + s}" y2="${y + s}" />`
+          + `<line class="rx-miss" x1="${x - s}" y1="${y + s}" x2="${x + s}" y2="${y - s}" /></g>`;
+      }
+    });
+    // x range labels
+    if (n) {
+      svg += `<text class="rx-ax" x="${PADL}" y="${H - 6}" text-anchor="start">${md(shown[0].date)}</text>`;
+      svg += `<text class="rx-ax" x="${W - PADR}" y="${H - 6}" text-anchor="end">${md(shown[n - 1].date)}</text>`;
+    }
+    svg += `</svg>`;
+
+    const more = rows.length > shown.length ? ` · latest ${shown.length} of ${rows.length}` : "";
+    box.innerHTML =
+      `<span class="eyebrow">Reaction model · predicted vs actual</span>`
+      + `<div class="rx-tabs">${tabs}</div>`
+      + `<div class="rx-chart">${svg}</div>`
+      + `<div class="rx-legend">`
+        + `<span><i class="k-hit">●</i>correct call</span>`
+        + `<span><i class="k-miss">✕</i>missed</span>`
+        + `<span><i>○</i>pending actual</span>`
+      + `</div>`
+      + `<div class="rx-note">y = model P(price up); above 0.5 = up call. `
+        + `Direction hit-rate ${rxHorizon}: <b>${g.n ? Math.round(100 * g.hit / g.n) + "%" : "–"}</b>`
+        + ` over ${g.n} settled event${g.n === 1 ? "" : "s"}${more}.</div>`;
+  }
+
+  byId("reactionChart").addEventListener("click", e => {
+    const t = e.target.closest(".rx-tab"); if (!t || !BOOT) return;
+    rxHorizon = t.dataset.h;
+    const cached = outlookCache[BOOT.companies[focusCik].t];
+    if (cached) drawReaction(cached);
+  });
+
   /* ---- search-as-you-type ---- */
   const search = byId("search"), results = byId("results");
   let matches = [], active = -1;
@@ -258,10 +380,61 @@
     btnU.setAttribute("aria-pressed", mode === "universe");
     btnC.setAttribute("aria-pressed", mode === "company");
     selected = mode === "company" ? focusCik : null;
+    resetView();          // new scope/focus → fit the whole layout
     draw();
     renderFeed();
     renderOutlook();
+    updateReaction();
   }
+
+  /* ---- graph zoom & pan (SVG viewBox; survives redraws, reset on scope change) ---- */
+  const VB0 = { x:0, y:0, w:W, h:H };
+  let vb = { ...VB0 };
+  const MIN_W = W * 0.2, MAX_W = W * 1.5;   // smaller w = zoomed in
+  const applyVB = () => svg.setAttribute("viewBox", `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
+  const resetView = () => { vb = { ...VB0 }; applyVB(); };
+  // client px → SVG user coords, honouring viewBox + preserveAspectRatio letterboxing
+  const toSvg = (cx, cy) => {
+    const pt = svg.createSVGPoint(); pt.x = cx; pt.y = cy;
+    return pt.matrixTransform(svg.getScreenCTM().inverse());
+  };
+  function zoomAt(px, py, factor) {
+    const nw = Math.min(MAX_W, Math.max(MIN_W, vb.w * factor));
+    const nh = nw * (H / W);
+    const fx = (px - vb.x) / vb.w, fy = (py - vb.y) / vb.h;   // keep (px,py) fixed on screen
+    vb = { x:px - fx * nw, y:py - fy * nh, w:nw, h:nh };
+    applyVB();
+  }
+  svg.addEventListener("wheel", e => {
+    e.preventDefault();
+    const p = toSvg(e.clientX, e.clientY);
+    zoomAt(p.x, p.y, e.deltaY > 0 ? 1.12 : 1 / 1.12);
+  }, { passive:false });
+  let pan = null;
+  svg.addEventListener("pointerdown", e => {
+    if (e.target.closest(".node-hit")) return;   // nodes keep their own click/focus
+    pan = { x:e.clientX, y:e.clientY };
+    svg.setPointerCapture(e.pointerId);
+    svg.classList.add("grabbing");
+  });
+  svg.addEventListener("pointermove", e => {
+    if (!pan) return;
+    const a = toSvg(pan.x, pan.y), b = toSvg(e.clientX, e.clientY);
+    vb.x -= (b.x - a.x); vb.y -= (b.y - a.y);
+    pan.x = e.clientX; pan.y = e.clientY;
+    applyVB();
+  });
+  const endPan = e => {
+    if (!pan) return;
+    pan = null; svg.classList.remove("grabbing");
+    try { svg.releasePointerCapture(e.pointerId); } catch (_) {}
+  };
+  svg.addEventListener("pointerup", endPan);
+  svg.addEventListener("pointercancel", endPan);
+  const vbCenter = () => [vb.x + vb.w / 2, vb.y + vb.h / 2];
+  byId("zoomIn").addEventListener("click", () => zoomAt(...vbCenter(), 1 / 1.3));
+  byId("zoomOut").addEventListener("click", () => zoomAt(...vbCenter(), 1.3));
+  byId("zoomReset").addEventListener("click", resetView);
 
   /* ---- view switch: dashboard | directory | changes ---- */
   const viewDash = byId("viewDash"), viewDir = byId("viewDir"), viewChg = byId("viewChg");
@@ -378,52 +551,167 @@
     return mode === "universe" ? universeModel() : companyModel(focusCik);
   }
 
+  const UNI_NR = 11, UNI_SEP = 46;   // node radius + generous min centre-to-centre spacing
+
+  // concentric-ring packing: n points around (cx,cy) with arc & radial spacing >= sep,
+  // so large clusters fan out across rings instead of crowding one over-packed circle.
+  function ringPack(n, cx, cy, sep) {
+    if (n <= 0) return [];
+    if (n === 1) return [[cx, cy]];
+    const out = []; let placed = 0, ring = 1;
+    while (placed < n) {
+      const R = ring * sep;
+      const cap = Math.max(1, Math.floor((2 * Math.PI * R) / sep));
+      const take = Math.min(cap, n - placed);
+      const off = (ring % 2) * (Math.PI / take);        // stagger alternate rings
+      for (let i = 0; i < take; i++) {
+        const a = (i / take) * 2 * Math.PI - Math.PI / 2 + off;
+        out.push([cx + R * Math.cos(a), cy + R * Math.sin(a)]);
+      }
+      placed += take; ring++;
+    }
+    return out;
+  }
+
+  // safety pass: nudge apart any node pair whose circles sit closer than
+  // (rA + rB + gap). Pinned nodes (e.g. the focus hub) stay put. Catches
+  // cluster-to-cluster crowding (universe) and cross-arc collisions between
+  // owner/insider/subsidiary/supply groups (company) without disturbing a
+  // layout that is already clean. `pos`, if given, is kept in sync for edges.
+  function relax(nodes, gap, pos) {
+    const M = 18;
+    for (let pass = 0; pass < 120; pass++) {
+      let moved = false;
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const a = nodes[i], b = nodes[j];
+          if (a.pinned && b.pinned) continue;
+          const min = a.r + b.r + gap;
+          let dx = b.x - a.x, dy = b.y - a.y;
+          const d = Math.hypot(dx, dy) || 0.01;
+          if (d < min) {
+            const push = min - d;
+            dx /= d; dy /= d;
+            if (a.pinned) { b.x += dx * push; b.y += dy * push; }
+            else if (b.pinned) { a.x -= dx * push; a.y -= dy * push; }
+            else { a.x -= dx * push / 2; a.y -= dy * push / 2; b.x += dx * push / 2; b.y += dy * push / 2; }
+            moved = true;
+          }
+        }
+      }
+      for (const n of nodes) {
+        if (n.pinned) continue;
+        n.x = Math.max(M, Math.min(W - M, n.x));
+        n.y = Math.max(M, Math.min(H - M, n.y));
+      }
+      if (!moved) break;
+    }
+    if (pos) for (const n of nodes) pos[n.id] = [n.x, n.y];
+  }
+
+  // label-aware separation: treat each node's keep-out area as its circle PLUS
+  // its (estimated) label box, then resolve overlaps by minimum-translation so
+  // neither circles nor labels touch. Used for the company view, where labels
+  // are wide (company/person names) and circle-only spacing isn't enough.
+  function relaxLabels(nodes, fontPx, pad) {
+    const charW = fontPx * 0.62, labelH = fontPx * 1.3;
+    for (const n of nodes) {
+      const lw = (n.label ? n.label.length : 0) * charW;
+      n._hw = Math.max(n.r, lw / 2) + pad;
+      n._hh = n.r + labelH + pad;      // label rides just above (or below) the circle
+    }
+    for (let pass = 0; pass < 250; pass++) {
+      let moved = false;
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const a = nodes[i], b = nodes[j];
+          if (a.pinned && b.pinned) continue;
+          const ox = (a._hw + b._hw) - Math.abs(a.x - b.x);
+          const oy = (a._hh + b._hh) - Math.abs(a.y - b.y);
+          if (ox <= 0 || oy <= 0) continue;           // boxes clear
+          if (ox < oy) {                               // resolve on x (least penetration)
+            const dir = a.x <= b.x ? 1 : -1;
+            if (a.pinned) b.x += dir * ox;
+            else if (b.pinned) a.x -= dir * ox;
+            else { a.x -= dir * ox / 2; b.x += dir * ox / 2; }
+          } else {                                     // resolve on y
+            const dir = a.y <= b.y ? 1 : -1;
+            if (a.pinned) b.y += dir * oy;
+            else if (b.pinned) a.y -= dir * oy;
+            else { a.y -= dir * oy / 2; b.y += dir * oy / 2; }
+          }
+          moved = true;
+        }
+      }
+      for (const n of nodes) {
+        if (n.pinned) continue;
+        n.x = Math.max(n._hw, Math.min(W - n._hw, n.x));
+        n.y = Math.max(n._hh, Math.min(H - n._hh, n.y));
+      }
+      if (!moved) break;
+    }
+    for (const n of nodes) { delete n._hw; delete n._hh; }
+  }
+
   function universeModel() {
-    const centers = { A_semiconductors:[190,150], B_datacenter_power:[565,140],
-      C_ev_battery:[640,315], D_defense_space:[420,405], E_bioprocessing:[150,340], owner:[390,250] };
+    // cluster centres spread across the canvas; biggest cluster (semis) gets the
+    // roomiest corner, owners form the central hub.
+    const centers = { A_semiconductors:[340,290], B_datacenter_power:[935,250],
+      C_ev_battery:[1010,470], D_defense_space:[620,625], E_bioprocessing:[300,560], owner:[620,375] };
     const nodes = [], pos = {};
     for (const m in centers) {
-      const list = (groups[m] || []).slice();
-      const [cx, cy] = centers[m], R = Math.min(78, 22 + list.length * 3.4);
-      list.forEach((cik, i) => {
-        const ang = (i / list.length) * Math.PI * 2 - Math.PI / 2;
-        const x = cx + R * Math.cos(ang), y = cy + R * Math.sin(ang);
+      const list = (groups[m] || []);
+      const [cx, cy] = centers[m];
+      ringPack(list.length, cx, cy, UNI_SEP).forEach(([x, y], i) => {
+        const cik = list[i];
         pos[cik] = [x, y];
         const c = BOOT.companies[cik];
-        nodes.push({ id:cik, type:roleType[c.r], label:c.t, x, y, r:9, company:true,
+        nodes.push({ id:cik, type:roleType[c.r], label:c.t, x, y, r:UNI_NR, company:true,
           detail:companyDetail(cik) });
       });
     }
+    relax(nodes, UNI_SEP - 2 * UNI_NR, pos);   // gap so min centre distance ≈ UNI_SEP
     const edges = [];
     for (const [f, s] of BOOT.ownuni) if (pos[f] && pos[s]) edges.push({ a:f, b:s, type:"owner" });
     for (const [sup, cus] of BOOT.supply) if (cus && pos[sup] && pos[cus])
       edges.push({ a:sup, b:cus, type:"supply", emph:supplyChanged(sup) });
+    // aggregate badge: disclosed customers a supplier reports that have no
+    // in-universe node to draw an edge to (named_unresolved + unnamed, or an
+    // out-of-universe resolved name) — counted per supplier, shown as a chip.
+    const hidden = {};
+    for (const [sup, cus] of BOOT.supply) {
+      if (!pos[sup] || (cus && pos[cus])) continue;
+      hidden[sup] = (hidden[sup] || 0) + 1;
+    }
+    for (const n of nodes) if (hidden[n.id]) n.disclosedHidden = hidden[n.id];
     return { nodes, edges };
   }
 
   function companyModel(cik) {
     const c = BOOT.companies[cik];
-    const nodes = [{ id:cik, type:"company", label:c.t, x:W/2, y:H/2 - 6, r:32, company:true,
+    const cy0 = H/2 - 10;
+    const nodes = [{ id:cik, type:"company", label:c.t, x:W/2, y:cy0, r:44, company:true, pinned:true,
       sub:c.n.length > 18 ? c.n.slice(0, 17) + "…" : c.n, detail:companyDetail(cik) }];
     const edges = [];
     const place = (items, a0, a1, rad, mk) => {
       items.forEach((it, i) => {
         const a = items.length === 1 ? (a0 + a1) / 2 : a0 + (a1 - a0) * (i / (items.length - 1));
-        const x = W/2 + rad * Math.cos(a), y = (H/2 - 6) + rad * 0.82 * Math.sin(a);
+        const x = W/2 + rad * Math.cos(a), y = cy0 + rad * 0.82 * Math.sin(a);
         mk(it, x, y, i);
       });
     };
     // owners (top) pink
     const owners = (BOOT.stakes[cik] || []).slice(0, 5);
-    place(owners, -Math.PI*0.95, -Math.PI*0.05, 150, (o, x, y, i) => {
-      nodes.push({ id:`own${i}`, type:"owner", label:shorten(o[0], 16), sub:o[1].toFixed(1) + "%", x, y, r:17,
+    place(owners, -Math.PI*0.97, -Math.PI*0.03, 250, (o, x, y, i) => {
+      nodes.push({ id:`own${i}`, type:"owner", label:shorten(o[0], 16), sub:o[1].toFixed(1) + "%", x, y, r:20,
         detail:{ name:o[0], type:"owner", rows:[["Stake in " + c.t, o[1].toFixed(1) + "%"], ["Filing", "Schedule 13D/G"]] } });
       edges.push({ a:cik, b:`own${i}`, type:"owner" });
     });
     // insiders (right) purple
     const ins = (BOOT.insiders[cik] || []).slice(0, 4);
-    place(ins, -Math.PI*0.35, Math.PI*0.25, 168, (p, x, y, i) => {
-      nodes.push({ id:`ins${i}`, type:"insider", label:shorten(p[0], 16), sub:shorten(p[1], 14), x, y, r:16,
+    place(ins, -Math.PI*0.38, Math.PI*0.28, 288, (p, x, y, i) => {
+      nodes.push({ id:`ins${i}`, type:"insider", label:shorten(p[0], 16), x, y, r:19,
+        tipMeta:p[1],
         detail:{ name:p[0], type:"insider", rows:[["Role", p[1]], ["Filing", "Form 4"]] } });
       edges.push({ a:cik, b:`ins${i}`, type:"insider" });
     });
@@ -432,32 +720,41 @@
     if (sub) {
       const names = (sub.names || []).slice(0, 3);
       const items = names.concat(sub.n > names.length ? [`+${sub.n - names.length} more`] : []);
-      place(items, Math.PI*0.15, Math.PI*0.6, 150, (nm, x, y, i) => {
+      place(items, Math.PI*0.12, Math.PI*0.62, 250, (nm, x, y, i) => {
         const more = nm.startsWith("+");
-        nodes.push({ id:`sub${i}`, type:"subsidiary", label:shorten(nm, 16), x, y, r:more ? 16 : 14, expand:more,
+        nodes.push({ id:`sub${i}`, type:"subsidiary", label:shorten(nm, 16), x, y, r:more ? 19 : 17, expand:more,
           detail:{ name:more ? `${sub.n} subsidiaries` : nm, type:"subsidiary",
                    rows:[["Parent", c.t], ["Total", sub.n], ["Source", "Exhibit 21"]] } });
         edges.push({ a:cik, b:`sub${i}`, type:"subsidiary" });
       });
     }
-    // supply partners (left) orange dashed — customers if we're a supplier, suppliers if a customer
+    // supply partners (left) orange dashed — customers if we're a supplier, suppliers if a customer.
+    // All three tiers show: resolved (in-universe, refocusable), named_unresolved
+    // (named but off-universe), and unnamed (disclosed concentration, counterparty
+    // withheld → "Undisclosed"). Non-resolved tiers render muted (dashed, dimmed).
+    const partnerLabel = (cus, nm, tier) =>
+      cus && BOOT.companies[cus] ? BOOT.companies[cus].t
+        : tier === "unnamed" ? "Undisclosed" : shorten(nm, 14);
     const asSupplier = BOOT.supply.filter(e => e[0] === cik);
     const asCustomer = BOOT.supply.filter(e => e[1] === cik);
     const partners = [];
     for (const [, cus, nm, p, tier] of asSupplier)
-      partners.push({ dir:"→", label:cus && BOOT.companies[cus] ? BOOT.companies[cus].t : shorten(nm, 14),
+      partners.push({ dir:"→", label:partnerLabel(cus, nm, tier),
         pct:p, tier, cik:cus, supplier:cik });
     for (const [sup, , , p, tier] of asCustomer)
       partners.push({ dir:"←", label:BOOT.companies[sup] ? BOOT.companies[sup].t : "?", pct:p, tier, cik:sup, supplier:sup });
-    place(partners.slice(0, 6), Math.PI*0.72, Math.PI*1.28, 165, (pt, x, y, i) => {
-      nodes.push({ id:`sup${i}`, type:"supply", label:pt.label, sub:pt.pct != null ? pt.pct.toFixed(0) + "%" : "", x, y, r:16,
-        company:!!pt.cik, refocus:pt.cik,
+    const tierRank = { resolved:0, named_unresolved:1, unnamed:2 };
+    partners.sort((a, b) => (tierRank[a.tier] - tierRank[b.tier]) || ((b.pct || 0) - (a.pct || 0)));
+    place(partners.slice(0, 6), Math.PI*0.70, Math.PI*1.30, 280, (pt, x, y, i) => {
+      nodes.push({ id:`sup${i}`, type:"supply", label:pt.label, sub:pt.pct != null ? pt.pct.toFixed(0) + "%" : "", x, y, r:19,
+        company:!!pt.cik, refocus:pt.cik, muted:pt.tier !== "resolved",
         detail:{ name:pt.label, type:"supply",
                  rows:[[pt.dir === "→" ? "Customer of " + c.t : "Supplier to " + c.t,
                         pt.pct != null ? pt.pct.toFixed(1) + "% of rev" : "n/a"],
                        ["Tier", pt.tier], ["Source", "10-K (disclosed)"]] } });
       edges.push({ a:cik, b:`sup${i}`, type:"supply", emph:supplyChanged(pt.supplier) });
     });
+    relaxLabels(nodes, 11, 4);   // keep circles AND wide name-labels from overlapping
     return { nodes, edges };
   }
 
@@ -471,9 +768,11 @@
     if (owners.length) rows.push([">5% owners", owners.length]);
     if (BOOT.insiders[cik]) rows.push(["Insiders (Form 4)", BOOT.insiders[cik].length]);
     if (BOOT.subs[cik]) rows.push(["Subsidiaries", BOOT.subs[cik].n]);
-    const sup = BOOT.supply.filter(e => e[0] === cik).length;
+    const asSup = BOOT.supply.filter(e => e[0] === cik);
+    const undisclosed = asSup.filter(e => e[4] !== "resolved").length;
     const cus = BOOT.supply.filter(e => e[1] === cik && e[4] === "resolved").length;
-    if (sup) rows.push(["Discloses customers", sup]);
+    if (asSup.length) rows.push(["Discloses customers",
+      asSup.length + (undisclosed ? ` (${undisclosed} undisclosed)` : "")]);
     if (cus) rows.push(["Named as supplier by", cus]);
     return { name:c.n, type:"company", rows };
   }
@@ -511,7 +810,8 @@
       if (mode === "universe" && searchQuery) g.setAttribute("opacity", nodeMatches(n.id) ? "1" : "0.16");
       const isSel = n.id === selected;
       const c = el("circle", { cx:n.x, cy:n.y, r:n.r, fill:fill(n.type), stroke:stroke(n.type), "stroke-width":isSel ? 4 : 2 });
-      if (n.expand) c.setAttribute("stroke-dasharray", "4 3");
+      if (n.expand || n.muted) c.setAttribute("stroke-dasharray", "4 3");
+      if (n.muted) c.setAttribute("fill-opacity", "0.35");
       if (isSel) g.appendChild(el("circle", { cx:n.x, cy:n.y, r:n.r + 5, fill:"none", stroke:stroke(n.type), "stroke-width":1, "stroke-opacity":0.4 }));
       g.appendChild(c);
       const big = n.r > 24;
@@ -534,9 +834,26 @@
         dt.textContent = "Δ"; g.appendChild(dt);
       }
 
+      // disclosure badge (universe view): count of disclosed supply partners with
+      // no in-universe node to draw an edge to. Bottom-right, opposite the Δ badge.
+      if (n.disclosedHidden) {
+        const br = 6, off = n.r * 0.78 + 1;
+        const bx = n.x + off, by = n.y + off;
+        g.appendChild(el("circle", { cx:bx, cy:by, r:br,
+          fill:cssv("--n-supply-fill"), stroke:cssv("--n-supply-stroke"), "stroke-width":1 }));
+        const dt = el("text", { x:bx, y:by + 2.4, "text-anchor":"middle",
+          "font-size":7, fill:"#fff", "font-family":cssv("--font-mono") });
+        dt.textContent = n.disclosedHidden > 9 ? "9+" : String(n.disclosedHidden);
+        g.appendChild(dt);
+      }
+
       const show = ev => { const p = ev.touches ? ev.touches[0] : ev;
         tip.querySelector(".tt").textContent = n.detail.name;
-        tip.querySelector(".tm").textContent = typeName[n.type];
+        // name / position (if any) / type — position line hides itself when empty
+        const type = typeName[n.type];
+        tip.querySelector(".tm").textContent =
+          n.tipMeta && n.tipMeta.toLowerCase() !== type.toLowerCase() ? n.tipMeta : "";
+        tip.querySelector(".ty").textContent = type;
         tip.querySelector(".tc").textContent = ch ? changeTip(ch) : "";
         tip.style.opacity = 1; tip.style.left = Math.min(p.clientX + 14, innerWidth - 270) + "px";
         tip.style.top = (p.clientY + 14) + "px"; };
@@ -569,11 +886,15 @@
     const items = mode === "universe"
       ? [["company","customer"],["supply","supplier"],["owner","owner / holder"]]
       : [["company","company"],["owner","owner"],["insider","insider"],["subsidiary","subsidiary"],["supply","supplier/customer"]];
+    const supplyKey = mode === "universe"
+      ? `<span class="delta-key"><span class="dk" style="background:${fill("supply")};border-color:${stroke("supply")};color:#fff">n</span> disclosed customers · not in universe</span>`
+      : `<span class="delta-key"><span class="dk" style="background:${fill("supply")};border-style:dashed;border-color:${stroke("supply")};opacity:.6"></span> unnamed / off-universe</span>`;
     byId("legend").innerHTML = items.map(([t, l]) =>
       `<span class="li"><span class="lk" style="border-color:${stroke(t)};background:${fill(t)}"></span> ${l}</span>`).join("")
       + `<span class="edge-note"><i></i> structured</span>`
       + `<span class="edge-note"><i class="dash"></i> supply-chain · disclosed</span>`
       + `<span class="edge-note"><i class="emph"></i> supply edge changed</span>`
+      + supplyKey
       + `<span class="delta-key"><span class="dk">Δ</span> changed · last ${BOOT ? BOOT.changeWindowDays : 45}d</span>`;
   }
 

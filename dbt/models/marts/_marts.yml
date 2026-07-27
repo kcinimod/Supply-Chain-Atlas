@@ -135,9 +135,11 @@ models:
   - name: fact_supply_relationship
     description: >
       Supplier -> customer edge extracted from 10-K free text by a local LLM.
-      One row per disclosed customer-concentration fact, tiered by reliability
-      (resolved / named_unresolved / unnamed) -- the honest counterpart to the
-      dashboard's solid-vs-dashed edge distinction.
+      One row per disclosed customer-concentration fact PER FILING YEAR, tiered by
+      reliability (resolved / named_unresolved / unnamed) -- the honest counterpart
+      to the dashboard's solid-vs-dashed edge distinction. Because an annual filer
+      re-discloses the same edge yearly, is_current marks the latest fiscal year per
+      (supplier, customer) so consumers see one current edge while history is kept.
     columns:
       - name: rel_id
         description: Surrogate primary key (bigserial).
@@ -161,6 +163,12 @@ models:
           - accepted_values:
               values: ['resolved', 'named_unresolved', 'unnamed']
       - name: is_resolved
+        data_tests: [not_null]
+      - name: is_current
+        description: >
+          True for the most recent fiscal year of each (supplier, customer)
+          relationship. Dashboard/API read is_current to dedupe repeat annual
+          disclosures; older years remain for trajectory.
         data_tests: [not_null]
 
   - name: fact_price_daily

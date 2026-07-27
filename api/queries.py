@@ -49,9 +49,15 @@ def bootstrap() -> dict:
             "SELECT company_cik, count(*), "
             "  (array_agg(subsidiary_name ORDER BY subsidiary_name))[1:3] "
             "FROM analytics.bridge_subsidiary WHERE is_latest_filing GROUP BY 1").fetchall()
+        # all three tiers reach the client: resolved edges draw between two
+        # universe nodes; named_unresolved + unnamed have no in-universe
+        # counterpart, so they surface as partner nodes in company view and as
+        # an aggregate disclosure badge in universe view. is_current keeps one
+        # edge per relationship (an annual filer re-discloses the same customer
+        # every 10-K; older years live in the fact but must not double-draw).
         supply = c.execute(
             "SELECT supplier_cik, customer_cik, customer_name_raw, pct_of_revenue, tier "
-            "FROM analytics.fact_supply_relationship WHERE is_named").fetchall()
+            "FROM analytics.fact_supply_relationship WHERE is_current").fetchall()
         ownuni = c.execute(
             "SELECT filer_cik, company_cik, max(class_percent) "
             "FROM analytics.fact_ownership_stake "
@@ -213,7 +219,7 @@ def _pulse(c) -> dict:
         " + (SELECT count(*) FROM analytics.fact_holding)"
         " + (SELECT count(*) FROM analytics.bridge_subsidiary)"
         " + (SELECT count(*) FROM analytics.fact_ownership_stake)"
-        " + (SELECT count(*) FROM analytics.fact_supply_relationship WHERE is_resolved)"
+        " + (SELECT count(*) FROM analytics.fact_supply_relationship WHERE is_resolved AND is_current)"
     ).fetchone()[0]
     return {
         "f1": round(float(met.get("f1", 0)), 2) if met else None,

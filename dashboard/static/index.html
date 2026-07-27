@@ -45,12 +45,20 @@
             <div id="results" class="results" hidden></div>
           </div>
         </div>
-        <svg id="graph" viewBox="0 0 760 470" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Relationship graph"></svg>
+        <div class="graph-wrap">
+          <svg id="graph" viewBox="0 0 1240 760" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Relationship graph (scroll to zoom, drag to pan)"></svg>
+          <div class="zoom-ctrl" role="group" aria-label="Zoom controls">
+            <button id="zoomIn" type="button" aria-label="Zoom in" title="Zoom in">+</button>
+            <button id="zoomOut" type="button" aria-label="Zoom out" title="Zoom out">−</button>
+            <button id="zoomReset" type="button" aria-label="Reset view" title="Reset view">⤢</button>
+          </div>
+        </div>
         <div class="legend" id="legend"></div>
       </div>
       <div class="detail" id="detail">
         <div class="detail-head" id="detailHead"></div>
         <div class="chips-row" id="outlookRow" hidden></div>
+        <div class="reaction" id="reactionChart" hidden></div>
         <div class="kv" id="detailKv"></div>
       </div>
     </section>
@@ -75,7 +83,7 @@
     <div class="footnote" style="padding:8px 2px 0">Click a row to focus that company in the graph.</div>
   </section>
 
-  <div id="tip" role="status" aria-live="polite"><div class="tt"></div><div class="tm"></div><div class="tc"></div></div>
+  <div id="tip" role="status" aria-live="polite"><div class="tt"></div><div class="tm"></div><div class="ty"></div><div class="tc"></div></div>
 
 <script src="/static/app.js"></script>
 </body>
