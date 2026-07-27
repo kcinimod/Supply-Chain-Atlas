@@ -5,7 +5,7 @@
         └─> market prices (yfinance) ────────────────────────────────────┤
         └─> 8-K label layer ─────────────────────────────────────────────┤
                                                                           ▼
-                                freshness gate ──> dbt build (cosmos group)
+                       freshness gate ──> dbt manifest ──> dbt build (cosmos)
                                                                           ▼
                        detect events ──> [score 8-Ks · reaction predict] ─> alerts
 
@@ -85,6 +85,21 @@ def daily_pipeline():
         return {"n_sources": len(r["results"])}
 
     @task
+    def refresh_dbt_manifest() -> str:
+        """Keep the Cosmos render source current. The task group's shape is read
+        from dbt/target/manifest.json at DAG-parse time, so a model added since
+        the last `compose up` would otherwise not appear until a restart. Cheap
+        (`dbt parse`, no warehouse work) and it runs before the build it feeds."""
+        import subprocess
+
+        from atlas_common import ATLAS_ROOT
+        subprocess.run(
+            ["dbt", "parse", "--profiles-dir", f"{ATLAS_ROOT}/dbt", "--target", "dev"],
+            cwd=f"{ATLAS_ROOT}/dbt", check=True,
+        )
+        return f"{ATLAS_ROOT}/dbt/target/manifest.json"
+
+    @task
     def detect_events() -> dict:
         from events import detect
         results = detect.run()
@@ -114,6 +129,7 @@ def daily_pipeline():
     silvers = [_silver(n) for n in ("form4", "form13f", "exhibit21", "sched13dg")]
     labels = label_8ks()
     gate = freshness_gate()
+    manifest = refresh_dbt_manifest()
     dbt = dbt_task_group()
     detected = detect_events()
     scored = score_8ks()
@@ -123,7 +139,7 @@ def daily_pipeline():
     uni >> polled >> docs
     docs >> silvers
     docs >> labels
-    [*silvers, labels, prices, polled] >> gate >> dbt >> detected
+    [*silvers, labels, prices, polled] >> gate >> manifest >> dbt >> detected
     detected >> [scored, predicted] >> alerts
 
 

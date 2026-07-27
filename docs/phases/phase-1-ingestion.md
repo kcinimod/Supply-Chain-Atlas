@@ -149,6 +149,55 @@ capture applied to filings. After any downtime the cursor **re-walks every
 missed index day automatically**: this is the mechanism that makes the nightly
 laptop-off window a non-event.
 
+#### The cursor bug this claim did not survive *(2026-07-27)*
+The paragraph above was true of the design and false of the code, and it took a
+real 14-day data loss to find out.
+
+SEC returns **403, not 404**, for a daily index that does not exist — and it
+publishes day *D*'s index only after that day's close (~02:00 UTC on *D+1*).
+`daily_pipeline` fires at 01:30 UTC. So every run asked for an index that could
+not exist yet, got `[]`, read that as *"day complete, zero filings"*, and
+**advanced the cursor onto the day it had never actually read**. The next run
+started at *D+1*, so the real index for *D* — published half an hour later — was
+never fetched again. Each day quietly consumed itself:
+
+```
+poller done: 2026-07-21..2026-07-21, 0 new filings
+poller done: 2026-07-22..2026-07-22, 0 new filings
+poller done: 2026-07-23..2026-07-23, 0 new filings
+```
+
+**146 universe filings across 2026-07-10..07-23 were lost, 27 of them 8-Ks**,
+while `ingest_checkpoint` reported `last_status = 'ok'` the entire time. A
+silent, cursor-advancing loss is the worst failure shape an incremental loader
+has: no error, no retry, no gap in the checkpoint — just missing rows.
+
+**What caught it.** Not a test, and not the checkpoint — the **freshness gate**
+(§ phase 3). Form 4 and Schedule 13G kept arriving, so totals looked healthy;
+but 8-K's learned threshold is 14 days and it had been silent for 18, so the
+gate hard-failed the run. This is precisely the scenario the module's docstring
+was written for — *"a renamed form type silently stopped arriving for months"* —
+firing against a different root cause than the one it was designed for.
+
+**The fix** (`ingestion/poller.py`) stops trusting a status code to mean
+"empty", and resolves the ambiguity by date instead:
+
+| Day is… | Index empty means | Cursor |
+|---|---|---|
+| weekend | no index is ever published | advance |
+| weekday, inside a 2-day grace window | not published yet, or we were throttled | **stop — retry next run** |
+| weekday, past the grace window | a genuine non-filing day (market holiday) | advance |
+
+The grace window is what makes it self-healing rather than merely stricter: a
+premature or throttled fetch now costs a retry, never data, and a real holiday
+still can't wedge the walk. Five tests in `tests/test_poller.py` cover it; four
+of them fail against the old logic.
+
+> *The lesson worth saying out loud: an incremental loader must only ever commit
+> a cursor over data it has actually read. "I asked and got nothing back" and
+> "there is nothing there" are different facts, and conflating them loses rows
+> without ever raising an error.*
+
 ### 6e. Idempotency *(Day 2 — the property that makes re-runs and retries safe)*
 Every filing write is `ON CONFLICT (accession_no) DO NOTHING` — the accession
 number is EDGAR's globally-unique natural key. Verified: re-running the

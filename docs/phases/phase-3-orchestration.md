@@ -104,6 +104,46 @@ The machine is **off 00:00–09:00 SGT nightly**. Rules derived from that:
 > happens to Tuesday's run when the machine slept through Tuesday'. The answer
 > is: Wednesday's run is Tuesday's run — the cursor makes them the same run."*
 
+The self-healing claim above is load-bearing, and on **2026-07-27** two separate
+production failures showed what it costs when a link in it is wrong. Both are
+documented rather than quietly patched, because both are the kind of bug that
+only appears once a stack runs unattended for a fortnight:
+
+1. **The cursor advanced over unread days** — a silent 146-filing loss caught by
+   the freshness gate, not by any test. Full write-up in
+   [phase-1-ingestion.md](phase-1-ingestion.md) § 6d.
+2. **Cosmos rendered the dbt project on every DAG import** (below).
+
+### Rendering cost: why 49 tasks died before running a line
+Cosmos's default `LoadMode.AUTOMATIC` shells out to `dbt ls` **at DAG-import
+time**, which cost ~8.5s here against Airflow's stock 30s `DAGBAG_IMPORT_TIMEOUT`
+— only ~3.5× headroom. The trap is that **Airflow 3 re-imports the DAG file
+inside every task process**, so a 49-task run paid that cost ~49 times and had 49
+independent chances to exceed it. When it did, the task did not fail with a
+useful error; it failed with `Dag not found during start up` before executing
+anything, then exhausted its startup reschedules. That is what killed the
+2026-07-24 `daily_pipeline` and 2026-07-26 `weekly_retrain` runs — and only the
+two Cosmos DAGs died, while `daily_eval` and `nlp_overlay` (0.5–0.7s parses) ran
+through the same window untouched.
+
+The fix has two halves, because speed alone would have been the wrong lesson:
+
+- **Render from a prebuilt manifest.** `RenderConfig(load_method=DBT_MANIFEST)`
+  reads `dbt/target/manifest.json` instead of spawning `dbt ls`. `dbt parse`
+  regenerates it in `airflow-init` on every `compose up`, and a
+  `refresh_dbt_manifest` task refreshes it ahead of the build, so DAG shape
+  tracks the models. If the manifest is ever missing, `atlas_common` falls back
+  to the live `dbt ls` path — a stale-shape risk is worse than a slow parse.
+- **Raise the ceilings anyway** (`DAGBAG_IMPORT_TIMEOUT=180`,
+  `DAG_FILE_PROCESSOR_TIMEOUT=240`). Cosmos still spends ~4.9s converting 97
+  manifest nodes into a task graph, so the honest gain is 8.4s → 5.2s, *not* the
+  sub-second the manifest mode suggests. The real win is headroom: ~3.5× → ~25×.
+
+> *The generalisable point: a timeout that a healthy run clears by 3× is not a
+> safety margin, it's a scheduled outage waiting for a slow morning. And when
+> the thing being timed runs once per task rather than once per DAG, measure it
+> per task.*
+
 ## 4. The four DAGs
 
 | DAG | Schedule (SGT) | What it owns |

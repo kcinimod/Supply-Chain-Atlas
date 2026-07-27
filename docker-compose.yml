@@ -25,6 +25,14 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__AUTH_MANAGER: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager
     AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
     AIRFLOW__SCHEDULER__CATCHUP_BY_DEFAULT: "false"
+    # Cosmos renders the dbt project at DAG-IMPORT time, and Airflow 3 re-imports
+    # the DAG inside every task process. Even reading a prebuilt manifest, a cold
+    # boot of this stack contends for CPU hard enough to blow the stock 30s
+    # DagBag limit — and a blown limit does not retry cleanly, it fails the task
+    # with "Dag not found during start up". Generous ceilings; they only bound
+    # pathological parses, they are not a per-run cost.
+    AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: "180"
+    AIRFLOW__DAG_PROCESSOR__DAG_FILE_PROCESSOR_TIMEOUT: "240"
     # Airflow 3 task processes call back to the execution API; the default
     # (localhost:8080) only works single-container — point at the apiserver.
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
@@ -110,11 +118,20 @@ services:
     volumes:
       - mlartifacts:/mlartifacts
 
+  # Migrates the Airflow metadata DB and builds the dbt manifest that Cosmos
+  # renders the dbt task groups from (see atlas_common.dbt_task_group). Doing the
+  # `dbt parse` here means the manifest is regenerated on every `compose up`, so
+  # a model added while the stack was down is picked up on the next start.
   airflow-init:
     <<: *airflow-common
     container_name: atlas-airflow-init
-    entrypoint: airflow
-    command: ["db", "migrate"]
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        set -e
+        airflow db migrate
+        cd /opt/atlas/dbt && dbt parse --profiles-dir /opt/atlas/dbt --target dev
     restart: "no"
 
   airflow-scheduler:
